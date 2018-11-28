@@ -40,6 +40,9 @@ namespace MSI_LED_Tool
         private const int DefaultDelay = 2000;
         private const int NoAnimationDelay = 60000;
 
+        private static int Speed = 7;
+
+
         private static Thread updateThreadFront;
         private static Thread updateThreadBack;
         private static Thread updateThreadSide;
@@ -47,8 +50,10 @@ namespace MSI_LED_Tool
         private static List<int> adapterIndexes;
 
         private static bool vgaMutex;
-        private static Color ledColor;
+        private static int LedIterator = 1;
+        public static List<Color> _listColors = new List<Color>();
         private static AnimationType animationType;
+        private static bool EnableSideLeds;
         private static Manufacturer manufacturer;
         private static int[] temperatureLimits;
         private static bool overwriteSecurityChecks;
@@ -71,9 +76,21 @@ namespace MSI_LED_Tool
 
                     if (settings != null)
                     {
-                        ledColor = Color.FromArgb(255, settings.R, settings.G, settings.B);
-                        animationType = settings.AnimationType;
+                        //Detect Colors
 
+                        foreach (var colorString in settings.Colors)
+                        {
+                            int R = Int32.Parse(colorString.Split(',')[0]);
+                            int G = Int32.Parse(colorString.Split(',')[1]);
+                            int B = Int32.Parse(colorString.Split(',')[2]);
+                            _listColors.Add(Color.FromArgb(255, R, G, B));
+                        }
+
+
+
+                        Speed = settings.BreathingSpeed;
+                        animationType = settings.AnimationType;
+                        EnableSideLeds = settings.EnableSideLeds;
                         if (settings.TemperatureLowerLimit < 0)
                         {
                             settings.TemperatureLowerLimit = 0;
@@ -89,7 +106,7 @@ namespace MSI_LED_Tool
                             settings.TemperatureUpperLimit = settings.TemperatureLowerLimit + 1;
                         }
 
-                        temperatureLimits = new[] { settings.TemperatureLowerLimit, settings.TemperatureUpperLimit};
+                        temperatureLimits = new[] { settings.TemperatureLowerLimit, settings.TemperatureUpperLimit };
 
                         overwriteSecurityChecks = settings.OverwriteSecurityChecks;
                     }
@@ -102,23 +119,28 @@ namespace MSI_LED_Tool
                     sw.WriteLine(
                         JsonSerializer<LedSettings>.Serialize(new LedSettings
                         {
-                            R = 255,
-                            G = 0,
-                            B = 0,
-                            AnimationType = AnimationType.NoAnimation,
+                            Colors = new List<string>()
+                            {
+                                "0,80,255",
+                                "0,0,0",
+                                "50,0,120"
+                            },
+                            AnimationType = AnimationType.Breathing,
                             TemperatureUpperLimit = 85,
                             TemperatureLowerLimit = 45,
-                            OverwriteSecurityChecks = false
+                            OverwriteSecurityChecks = false,
+                            EnableSideLeds = false,
+                            BreathingSpeed = 7
                         }));
                 }
             }
 
-            if (ledColor == null)
-            {
-                ledColor = Color.Red;
-                animationType = AnimationType.NoAnimation;
-                overwriteSecurityChecks = false;
-            }
+            //if (ledColor1 == null)
+            //{
+            //    ledColor1 = Color.Red;
+            //    animationType = AnimationType.NoAnimation;
+            //    overwriteSecurityChecks = false;
+            //}
 
             adapterIndexes = new List<int>();
 
@@ -179,7 +201,7 @@ namespace MSI_LED_Tool
         {
             for (int i = 0; i < gpuCount; i++)
             {
-                NdaGraphicsInfo graphicsInfo; 
+                NdaGraphicsInfo graphicsInfo;
                 if (NDA_GetGraphicsInfo(i, out graphicsInfo) == false)
                 {
                     return false;
@@ -216,10 +238,10 @@ namespace MSI_LED_Tool
                 {
                     return false;
                 }
-                
+
                 // PCI\VEN_1002&DEV_67DF&SUBSYS_34111462&REV_CF\4&25438C51&0&0008
                 var pnpSegments = graphicsInfo.Card_PNP.Split('\\');
-                
+
                 if (pnpSegments.Length < 2)
                 {
                     continue;
@@ -257,56 +279,34 @@ namespace MSI_LED_Tool
 
         private static void UpdateLedsFront()
         {
-            while (true)
+            if (EnableSideLeds)
             {
-                switch (animationType)
+                while (true)
                 {
-                    case AnimationType.NoAnimation:
-                        UpdateLeds(21, 4, 4);
-                        Thread.Sleep(NoAnimationDelay);
-                        break;
-                    case AnimationType.Breathing:
-                        UpdateLeds(27, 4, 7);
-                        break;
-                    case AnimationType.Flashing:
-                        UpdateLeds(28, 4, 0, 25, 100);
-                        break;
-                    case AnimationType.DoubleFlashing:
-                        UpdateLeds(30, 4, 0, 10, 10, 91);
-                        break;
-                    case AnimationType.Off:
-                        UpdateLeds(24, 4, 4);
-                        Thread.Sleep(NoAnimationDelay);
-                        break;
-                    case AnimationType.TemperatureBased:
-                        switch (manufacturer)
-                        {
-                            case Manufacturer.Nvidia:
-                                mutex.WaitOne();
-                                if (NDA_GetGraphicsInfo(0, out ndaGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], ndaGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 4, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                            case Manufacturer.AMD:
-                                mutex.WaitOne();
-                                if (ADL_GetGraphicsInfo(0, out adlGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], adlGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 4, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                        }
-                        break;
+                    switch (animationType)
+                    {
+                        case AnimationType.NoAnimation:
+                            UpdateLeds(21, 4, 4);
+                            Thread.Sleep(NoAnimationDelay);
+                            break;
+                        case AnimationType.Breathing:
+                            UpdateLeds(27, 4, Speed);
+                            break;
+                        case AnimationType.Flashing:
+                            UpdateLeds(28, 4, 0, 25, 100);
+                            break;
+                        case AnimationType.DoubleFlashing:
+                            UpdateLeds(30, 4, 0, 10, 10, 91);
+                            break;
+                        case AnimationType.Off:
+                            UpdateLeds(24, 4, 4);
+                            Thread.Sleep(NoAnimationDelay);
+                            break;
+                        
+                    }
                 }
             }
+
         }
 
 
@@ -317,11 +317,14 @@ namespace MSI_LED_Tool
                 switch (animationType)
                 {
                     case AnimationType.NoAnimation:
-                        UpdateLeds(21, 1, 4);
-                        Thread.Sleep(NoAnimationDelay);
+                        UpdateLeds(21, 1, Speed);
+                        if (_listColors.Count() == 1)
+                        {
+                            Thread.Sleep(NoAnimationDelay);
+                        }
                         break;
                     case AnimationType.Breathing:
-                        UpdateLeds(27, 1, 7);
+                        UpdateLeds(27, 1, Speed);
                         break;
                     case AnimationType.Flashing:
                         UpdateLeds(28, 1, 0, 25, 100);
@@ -333,93 +336,56 @@ namespace MSI_LED_Tool
                         UpdateLeds(24, 1, 4);
                         Thread.Sleep(NoAnimationDelay);
                         break;
-                    case AnimationType.TemperatureBased:
-                        switch (manufacturer)
-                        {
-                            case Manufacturer.Nvidia:
-                                mutex.WaitOne();
-                                if (NDA_GetGraphicsInfo(0, out ndaGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], ndaGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 1, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                            case Manufacturer.AMD:
-                                mutex.WaitOne();
-                                if (ADL_GetGraphicsInfo(0, out adlGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], adlGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 1, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                        }
-                        break;
+                    
                 }
             }
         }
 
         private static void UpdateLedsBack()
         {
-            while (true)
+            if (EnableSideLeds)
             {
-                switch (animationType)
+                while (true)
                 {
-                    case AnimationType.NoAnimation:
-                        UpdateLeds(21, 2, 4);
-                        Thread.Sleep(NoAnimationDelay);
-                        break;
-                    case AnimationType.Breathing:
-                        UpdateLeds(27, 2, 7);
-                        break;
-                    case AnimationType.Flashing:
-                        UpdateLeds(28, 2, 0, 25, 100);
-                        break;
-                    case AnimationType.DoubleFlashing:
-                        UpdateLeds(30, 2, 0, 10, 10, 91);
-                        break;
-                    case AnimationType.Off:
-                        UpdateLeds(24, 2, 4);
-                        Thread.Sleep(NoAnimationDelay);
-                        break;
-                    case AnimationType.TemperatureBased:
-                        switch (manufacturer)
-                        {
-                            case Manufacturer.Nvidia:
-                                mutex.WaitOne();
-                                if (NDA_GetGraphicsInfo(0, out ndaGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], ndaGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 2, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                            case Manufacturer.AMD:
-                                mutex.WaitOne();
-                                if (ADL_GetGraphicsInfo(0, out adlGraphicsInfo))
-                                {
-                                    int temperatureDelta = CalculateTemperatureDeltaHunderdBased(temperatureLimits[0],
-                                        temperatureLimits[1], adlGraphicsInfo.GPU_Temperature_Current);
-                                    ledColor = GetColorForDeltaTemperature(temperatureDelta);
-                                    UpdateLeds(21, 2, 4);
-                                }
-                                mutex.ReleaseMutex();
-                                break;
-                        }
-                        break;
+                    switch (animationType)
+                    {
+                        case AnimationType.NoAnimation:
+                            UpdateLeds(21, 2, 4);
+                            Thread.Sleep(NoAnimationDelay);
+                            break;
+                        case AnimationType.Breathing:
+                            UpdateLeds(27, 2, Speed);
+                            break;
+                        case AnimationType.Flashing:
+                            UpdateLeds(28, 2, 0, 25, 100);
+                            break;
+                        case AnimationType.DoubleFlashing:
+                            UpdateLeds(30, 2, 0, 10, 10, 91);
+                            break;
+                        case AnimationType.Off:
+                            UpdateLeds(24, 2, 4);
+                            Thread.Sleep(NoAnimationDelay);
+                            break;
+                    }
                 }
             }
         }
 
         private static void UpdateLeds(int cmd, int ledId, int time, int ontime = 0, int offtime = 0, int darkTime = 0)
         {
+            Color color = _listColors.First();
+            //Si plusieurs couleurs : On alterne entre elles
+            if (_listColors != null && _listColors.Count() > 1)
+            {
+                color = _listColors.ElementAt(LedIterator-1);
+
+                if (LedIterator % _listColors.Count() == 0)
+                    LedIterator = 1;
+                else
+                    LedIterator++;
+            }
+
+
             for (int i = 0; i < adapterIndexes.Count; i++)
             {
                 Thread.CurrentThread.Join(10);
@@ -434,12 +400,12 @@ namespace MSI_LED_Tool
 
                 if (manufacturer == Manufacturer.Nvidia)
                 {
-                    NDA_SetIlluminationParmColor_RGB(i, cmd, ledId, 0, ontime, offtime, time, darkTime, 0, ledColor.R, ledColor.G, ledColor.B, oneCall);
+                    NDA_SetIlluminationParmColor_RGB(i, cmd, ledId, 0, ontime, offtime, time, darkTime, 0, color.R, color.G, color.B, oneCall);
                 }
 
                 if (manufacturer == Manufacturer.AMD)
                 {
-                    ADL_SetIlluminationParm_RGB(i, cmd, ledId, 0, ontime, offtime, time, darkTime, 0, ledColor.R, ledColor.G, ledColor.B, oneCall);
+                    ADL_SetIlluminationParm_RGB(i, cmd, ledId, 0, ontime, offtime, time, darkTime, 0, color.R, color.G, color.B, oneCall);
                 }
 
                 vgaMutex = false;
@@ -492,7 +458,7 @@ namespace MSI_LED_Tool
 
         private static int GetRedForDeltaTemperature(int x)
         {
-            var percent = x/100.0f;
+            var percent = x / 100.0f;
             var value = Convert.ToInt32(percent * 255 * 2);
 
             if (value > 255)
